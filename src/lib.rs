@@ -124,7 +124,30 @@ pub enum TypeCheckError {
 
 pub type TypeEnvironment = HashMap<String, Type>;
 
-pub fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
+pub struct TypeChecker {
+    term: Term,
+    environment: TypeEnvironment,
+}
+
+impl TypeChecker {
+    pub fn new(term: Term) -> Self {
+        Self {
+            term,
+            environment: TypeEnvironment::new(),
+        }
+    }
+
+    pub fn with_environment(mut self, environment: TypeEnvironment) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    pub fn run(mut self) -> Result<Type> {
+        type_check(self.term, &mut self.environment)
+    }
+}
+
+fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
     match term {
         Term::True | Term::False => Ok(Type::Boolean),
         Term::Condition {
@@ -203,114 +226,88 @@ pub fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type>
 
 #[cfg(test)]
 mod tests {
-    use crate::{Parameter, Term, Type, TypeCheckError, TypeEnvironment, type_check};
+    use crate::{Parameter, Term, Type, TypeCheckError, TypeChecker, TypeEnvironment};
 
     #[test]
     fn test_boolean() {
-        let mut environment = TypeEnvironment::new();
-        assert_eq!(
-            type_check(Term::True, &mut environment).unwrap(),
-            Type::Boolean,
-        );
+        assert_eq!(TypeChecker::new(Term::True).run().unwrap(), Type::Boolean);
 
-        let mut environment = TypeEnvironment::new();
-        assert_eq!(
-            type_check(Term::False, &mut environment).unwrap(),
-            Type::Boolean,
-        );
+        assert_eq!(TypeChecker::new(Term::False).run().unwrap(), Type::Boolean);
     }
 
     #[test]
     fn test_condition() {
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::condition(Term::True, Term::number(1), Term::number(2)),
-                &mut environment,
-            )
+            TypeChecker::new(Term::condition(
+                Term::True,
+                Term::number(1),
+                Term::number(2),
+            ))
+            .run()
             .unwrap(),
             Type::Number,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::condition(Term::number(1), Term::True, Term::False),
-                &mut environment,
-            )
-            .unwrap_err()
-            .downcast::<TypeCheckError>()
-            .unwrap(),
+            TypeChecker::new(Term::condition(Term::number(1), Term::True, Term::False))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
             TypeCheckError::UnexpectedType,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::condition(Term::True, Term::number(1), Term::False),
-                &mut environment,
-            )
-            .unwrap_err()
-            .downcast::<TypeCheckError>()
-            .unwrap(),
+            TypeChecker::new(Term::condition(Term::True, Term::number(1), Term::False))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
             TypeCheckError::MismatchedTypes,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::condition(Term::True, Term::False, Term::number(1)),
-                &mut environment,
-            )
-            .unwrap_err()
-            .downcast::<TypeCheckError>()
-            .unwrap(),
+            TypeChecker::new(Term::condition(Term::True, Term::False, Term::number(1)))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
             TypeCheckError::MismatchedTypes,
         );
     }
 
     #[test]
     fn test_number() {
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(Term::number(1), &mut environment).unwrap(),
+            TypeChecker::new(Term::number(1)).run().unwrap(),
             Type::Number,
         );
     }
 
     #[test]
     fn test_addition() {
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::addition(Term::number(1), Term::number(2)),
-                &mut environment,
-            )
-            .unwrap(),
+            TypeChecker::new(Term::addition(Term::number(1), Term::number(2)))
+                .run()
+                .unwrap(),
             Type::Number,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::addition(Term::True, Term::number(1)),
-                &mut environment,
-            )
-            .unwrap_err()
-            .downcast::<TypeCheckError>()
-            .unwrap(),
+            TypeChecker::new(Term::addition(Term::True, Term::number(1)))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
             TypeCheckError::UnexpectedType,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::addition(Term::number(1), Term::True),
-                &mut environment,
-            )
-            .unwrap_err()
-            .downcast::<TypeCheckError>()
-            .unwrap(),
+            TypeChecker::new(Term::addition(Term::number(1), Term::True))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
             TypeCheckError::UnexpectedType,
         );
     }
@@ -320,13 +317,16 @@ mod tests {
         let mut environment = TypeEnvironment::new();
         environment.insert("a".into(), Type::Boolean);
         assert_eq!(
-            type_check(Term::variable("a"), &mut environment).unwrap(),
+            TypeChecker::new(Term::variable("a"))
+                .with_environment(environment)
+                .run()
+                .unwrap(),
             Type::Boolean,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(Term::variable("a"), &mut environment)
+            TypeChecker::new(Term::variable("a"))
+                .run()
                 .unwrap_err()
                 .downcast::<TypeCheckError>()
                 .unwrap(),
@@ -336,18 +336,15 @@ mod tests {
 
     #[test]
     fn test_function() {
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::function(
-                    vec![
-                        Parameter::new("a", Type::Boolean),
-                        Parameter::new("b", Type::Boolean),
-                    ],
-                    Term::True,
-                ),
-                &mut environment,
-            )
+            TypeChecker::new(Term::function(
+                vec![
+                    Parameter::new("a", Type::Boolean),
+                    Parameter::new("b", Type::Boolean),
+                ],
+                Term::True,
+            ))
+            .run()
             .unwrap(),
             Type::function(
                 vec![
@@ -361,70 +358,61 @@ mod tests {
 
     #[test]
     fn test_call() {
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::call(
-                    Term::function(
-                        vec![
-                            Parameter::new("a", Type::Boolean),
-                            Parameter::new("b", Type::Boolean),
-                        ],
-                        Term::True,
-                    ),
-                    vec![Term::True, Term::False],
+            TypeChecker::new(Term::call(
+                Term::function(
+                    vec![
+                        Parameter::new("a", Type::Boolean),
+                        Parameter::new("b", Type::Boolean),
+                    ],
+                    Term::True,
                 ),
-                &mut environment,
-            )
+                vec![Term::True, Term::False],
+            ))
+            .run()
             .unwrap(),
             Type::Boolean,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(Term::call(Term::True, vec![]), &mut environment)
+            TypeChecker::new(Term::call(Term::True, vec![]))
+                .run()
                 .unwrap_err()
                 .downcast::<TypeCheckError>()
                 .unwrap(),
             TypeCheckError::UnexpectedType,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::call(
-                    Term::function(
-                        vec![
-                            Parameter::new("a", Type::Boolean),
-                            Parameter::new("b", Type::Boolean),
-                        ],
-                        Term::True,
-                    ),
-                    vec![Term::True],
+            TypeChecker::new(Term::call(
+                Term::function(
+                    vec![
+                        Parameter::new("a", Type::Boolean),
+                        Parameter::new("b", Type::Boolean),
+                    ],
+                    Term::True,
                 ),
-                &mut environment,
-            )
+                vec![Term::True],
+            ))
+            .run()
             .unwrap_err()
             .downcast::<TypeCheckError>()
             .unwrap(),
             TypeCheckError::InvalidArity,
         );
 
-        let mut environment = TypeEnvironment::new();
         assert_eq!(
-            type_check(
-                Term::call(
-                    Term::function(
-                        vec![
-                            Parameter::new("a", Type::Boolean),
-                            Parameter::new("b", Type::Boolean),
-                        ],
-                        Term::True,
-                    ),
-                    vec![Term::True, Term::number(1)],
+            TypeChecker::new(Term::call(
+                Term::function(
+                    vec![
+                        Parameter::new("a", Type::Boolean),
+                        Parameter::new("b", Type::Boolean),
+                    ],
+                    Term::True,
                 ),
-                &mut environment,
-            )
+                vec![Term::True, Term::number(1)],
+            ))
+            .run()
             .unwrap_err()
             .downcast::<TypeCheckError>()
             .unwrap(),
