@@ -69,6 +69,15 @@ pub enum Term {
         function: Box<Self>,
         arguments: Vec<Self>,
     },
+    Sequence {
+        first: Box<Self>,
+        second: Box<Self>,
+    },
+    Constant {
+        name: String,
+        value: Box<Self>,
+        next: Box<Self>,
+    },
 }
 
 impl Term {
@@ -106,6 +115,21 @@ impl Term {
         Self::Call {
             function: Box::new(function),
             arguments,
+        }
+    }
+
+    pub fn sequence(first: Self, second: Self) -> Self {
+        Self::Sequence {
+            first: Box::new(first),
+            second: Box::new(second),
+        }
+    }
+
+    pub fn constant(name: &str, value: Self, next: Self) -> Self {
+        Self::Constant {
+            name: name.into(),
+            value: Box::new(value),
+            next: Box::new(next),
         }
     }
 }
@@ -221,6 +245,15 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
             }
             _ => bail!(TypeCheckError::UnexpectedType),
         },
+        Term::Sequence { first, second } => {
+            type_check(*first, environment)?;
+            type_check(*second, environment)
+        }
+        Term::Constant { name, value, next } => {
+            let value = type_check(*value, environment)?;
+            environment.insert(name, value);
+            type_check(*next, environment)
+        }
     }
 }
 
@@ -417,6 +450,26 @@ mod tests {
             .downcast::<TypeCheckError>()
             .unwrap(),
             TypeCheckError::MismatchedTypes,
+        );
+    }
+
+    #[test]
+    fn test_sequence() {
+        assert_eq!(
+            TypeChecker::new(Term::sequence(Term::True, Term::number(1)))
+                .run()
+                .unwrap(),
+            Type::Number,
+        );
+    }
+
+    #[test]
+    fn test_constant() {
+        assert_eq!(
+            TypeChecker::new(Term::constant("a", Term::True, Term::variable("a")))
+                .run()
+                .unwrap(),
+            Type::Boolean,
         );
     }
 }
