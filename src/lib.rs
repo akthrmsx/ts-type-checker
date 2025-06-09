@@ -10,6 +10,9 @@ pub enum Type {
         parameters: Vec<Parameter>,
         returning: Box<Self>,
     },
+    Object {
+        properties: Vec<TypeProperty>,
+    },
 }
 
 impl Type {
@@ -18,6 +21,12 @@ impl Type {
             parameters,
             returning: Box::new(returning),
         }
+    }
+
+    pub fn object(properties: Vec<TypeProperty>) -> Self {
+        let mut properties = properties;
+        properties.sort_by(|a, b| a.name.cmp(&b.name));
+        Self::Object { properties }
     }
 }
 
@@ -34,6 +43,21 @@ impl PartialEq for Parameter {
 }
 
 impl Parameter {
+    pub fn new(name: &str, typing: Type) -> Self {
+        Self {
+            name: name.into(),
+            typing,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeProperty {
+    name: String,
+    typing: Type,
+}
+
+impl TypeProperty {
     pub fn new(name: &str, typing: Type) -> Self {
         Self {
             name: name.into(),
@@ -77,6 +101,13 @@ pub enum Term {
         name: String,
         value: Box<Self>,
         next: Box<Self>,
+    },
+    Object {
+        properties: Vec<TermProperty>,
+    },
+    PropertyAccess {
+        object: Box<Self>,
+        name: String,
     },
 }
 
@@ -132,6 +163,34 @@ impl Term {
             next: Box::new(next),
         }
     }
+
+    pub fn object(properties: Vec<TermProperty>) -> Self {
+        let mut properties = properties;
+        properties.sort_by(|a, b| a.name.cmp(&b.name));
+        Self::Object { properties }
+    }
+
+    pub fn property_access(object: Self, name: &str) -> Self {
+        Self::PropertyAccess {
+            object: Box::new(object),
+            name: name.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TermProperty {
+    name: String,
+    term: Term,
+}
+
+impl TermProperty {
+    pub fn new(name: &str, term: Term) -> Self {
+        Self {
+            name: name.into(),
+            term,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -144,6 +203,8 @@ pub enum TypeCheckError {
     UnknownVariable,
     #[error("invalid arity")]
     InvalidArity,
+    #[error("unknown property")]
+    UnknownProperty,
 }
 
 pub type TypeEnvironment = HashMap<String, Type>;
@@ -254,12 +315,42 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
             environment.insert(name, value);
             type_check(*next, environment)
         }
+        Term::Object {
+            properties: term_properties,
+        } => {
+            let mut type_properties = vec![];
+
+            for term_property in term_properties {
+                type_properties.push(TypeProperty::new(
+                    &term_property.name,
+                    type_check(term_property.term, environment)?,
+                ));
+            }
+
+            Ok(Type::object(type_properties))
+        }
+        Term::PropertyAccess { object, name } => match type_check(*object, environment)? {
+            Type::Object { properties } => properties
+                .iter()
+                .find_map(|property| {
+                    if property.name == name {
+                        Some(property.typing.clone())
+                    } else {
+                        None
+                    }
+                })
+                .context(TypeCheckError::UnknownProperty),
+            _ => bail!(TypeCheckError::UnexpectedType),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Parameter, Term, Type, TypeCheckError, TypeChecker, TypeEnvironment};
+    use crate::{
+        Parameter, Term, TermProperty, Type, TypeCheckError, TypeChecker, TypeEnvironment,
+        TypeProperty,
+    };
 
     #[test]
     fn test_boolean() {
@@ -470,6 +561,62 @@ mod tests {
                 .run()
                 .unwrap(),
             Type::Boolean,
+        );
+    }
+
+    #[test]
+    fn test_object() {
+        assert_eq!(
+            TypeChecker::new(Term::object(vec![
+                TermProperty::new("a", Term::True),
+                TermProperty::new("b", Term::number(1)),
+            ]))
+            .run()
+            .unwrap(),
+            Type::object(vec![
+                TypeProperty::new("a", Type::Boolean),
+                TypeProperty::new("b", Type::Number),
+            ]),
+        );
+    }
+
+    #[test]
+    fn test_property_access() {
+        assert_eq!(
+            TypeChecker::new(Term::property_access(
+                Term::object(vec![
+                    TermProperty::new("a", Term::True),
+                    TermProperty::new("b", Term::number(1)),
+                ]),
+                "a",
+            ))
+            .run()
+            .unwrap(),
+            Type::Boolean,
+        );
+
+        assert_eq!(
+            TypeChecker::new(Term::property_access(Term::True, "a"))
+                .run()
+                .unwrap_err()
+                .downcast::<TypeCheckError>()
+                .unwrap(),
+            TypeCheckError::UnexpectedType,
+        );
+
+        assert_eq!(
+            TypeChecker::new(Term::property_access(
+                Term::object(vec![
+                    TermProperty::new("a", Term::True),
+                    TermProperty::new("b", Term::number(1)),
+                ]),
+                "c",
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
+            TypeCheckError::UnknownProperty,
         );
     }
 }
