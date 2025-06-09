@@ -16,6 +16,14 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn boolean() -> Self {
+        Self::Boolean
+    }
+
+    pub fn number() -> Self {
+        Self::Number
+    }
+
     pub fn function(parameters: Vec<Parameter>, returning: Self) -> Self {
         Self::Function {
             parameters,
@@ -68,14 +76,14 @@ impl TypeProperty {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Term {
-    True,
-    False,
+    TrueLiteral,
+    FalseLiteral,
     Condition {
         condition: Box<Self>,
         consequent: Box<Self>,
         alternative: Box<Self>,
     },
-    Number {
+    NumberLiteral {
         value: i64,
     },
     Addition {
@@ -102,7 +110,7 @@ pub enum Term {
         value: Box<Self>,
         next: Box<Self>,
     },
-    Object {
+    ObjectLiteral {
         properties: Vec<TermProperty>,
     },
     PropertyAccess {
@@ -112,6 +120,14 @@ pub enum Term {
 }
 
 impl Term {
+    pub fn true_literal() -> Self {
+        Self::TrueLiteral
+    }
+
+    pub fn false_literal() -> Self {
+        Self::FalseLiteral
+    }
+
     pub fn condition(condition: Self, consequent: Self, alternative: Self) -> Self {
         Self::Condition {
             condition: Box::new(condition),
@@ -120,8 +136,8 @@ impl Term {
         }
     }
 
-    pub fn number(value: i64) -> Self {
-        Self::Number { value }
+    pub fn number_literal(value: i64) -> Self {
+        Self::NumberLiteral { value }
     }
 
     pub fn addition(left: Self, right: Self) -> Self {
@@ -164,10 +180,10 @@ impl Term {
         }
     }
 
-    pub fn object(properties: Vec<TermProperty>) -> Self {
+    pub fn object_literal(properties: Vec<TermProperty>) -> Self {
         let mut properties = properties;
         properties.sort_by(|a, b| a.name.cmp(&b.name));
-        Self::Object { properties }
+        Self::ObjectLiteral { properties }
     }
 
     pub fn property_access(object: Self, name: &str) -> Self {
@@ -234,14 +250,14 @@ impl TypeChecker {
 
 fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
     match term {
-        Term::True | Term::False => Ok(Type::Boolean),
+        Term::TrueLiteral | Term::FalseLiteral => Ok(Type::boolean()),
         Term::Condition {
             condition,
             consequent,
             alternative,
         } => {
             ensure!(
-                type_check(*condition, environment)? == Type::Boolean,
+                type_check(*condition, environment)? == Type::boolean(),
                 TypeCheckError::UnexpectedType,
             );
 
@@ -253,18 +269,18 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
                 _ => bail!(TypeCheckError::MismatchedTypes),
             }
         }
-        Term::Number { .. } => Ok(Type::Number),
+        Term::NumberLiteral { .. } => Ok(Type::number()),
         Term::Addition { left, right } => {
             ensure!(
-                type_check(*left, environment)? == Type::Number,
+                type_check(*left, environment)? == Type::number(),
                 TypeCheckError::UnexpectedType,
             );
             ensure!(
-                type_check(*right, environment)? == Type::Number,
+                type_check(*right, environment)? == Type::number(),
                 TypeCheckError::UnexpectedType,
             );
 
-            Ok(Type::Number)
+            Ok(Type::number())
         }
         Term::Variable { name } => environment
             .get(&name)
@@ -315,7 +331,7 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
             environment.insert(name, value);
             type_check(*next, environment)
         }
-        Term::Object {
+        Term::ObjectLiteral {
             properties: term_properties,
         } => {
             let mut type_properties = vec![];
@@ -354,48 +370,66 @@ mod tests {
 
     #[test]
     fn test_boolean() {
-        assert_eq!(TypeChecker::new(Term::True).run().unwrap(), Type::Boolean);
+        assert_eq!(
+            TypeChecker::new(Term::true_literal()).run().unwrap(),
+            Type::boolean(),
+        );
 
-        assert_eq!(TypeChecker::new(Term::False).run().unwrap(), Type::Boolean);
+        assert_eq!(
+            TypeChecker::new(Term::false_literal()).run().unwrap(),
+            Type::boolean(),
+        );
     }
 
     #[test]
     fn test_condition() {
         assert_eq!(
             TypeChecker::new(Term::condition(
-                Term::True,
-                Term::number(1),
-                Term::number(2),
+                Term::true_literal(),
+                Term::number_literal(1),
+                Term::number_literal(2),
             ))
             .run()
             .unwrap(),
-            Type::Number,
+            Type::number(),
         );
 
         assert_eq!(
-            TypeChecker::new(Term::condition(Term::number(1), Term::True, Term::False))
-                .run()
-                .unwrap_err()
-                .downcast::<TypeCheckError>()
-                .unwrap(),
+            TypeChecker::new(Term::condition(
+                Term::number_literal(1),
+                Term::true_literal(),
+                Term::false_literal(),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
             TypeCheckError::UnexpectedType,
         );
 
         assert_eq!(
-            TypeChecker::new(Term::condition(Term::True, Term::number(1), Term::False))
-                .run()
-                .unwrap_err()
-                .downcast::<TypeCheckError>()
-                .unwrap(),
+            TypeChecker::new(Term::condition(
+                Term::true_literal(),
+                Term::number_literal(1),
+                Term::false_literal(),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
             TypeCheckError::MismatchedTypes,
         );
 
         assert_eq!(
-            TypeChecker::new(Term::condition(Term::True, Term::False, Term::number(1)))
-                .run()
-                .unwrap_err()
-                .downcast::<TypeCheckError>()
-                .unwrap(),
+            TypeChecker::new(Term::condition(
+                Term::true_literal(),
+                Term::false_literal(),
+                Term::number_literal(1),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
             TypeCheckError::MismatchedTypes,
         );
     }
@@ -403,35 +437,44 @@ mod tests {
     #[test]
     fn test_number() {
         assert_eq!(
-            TypeChecker::new(Term::number(1)).run().unwrap(),
-            Type::Number,
+            TypeChecker::new(Term::number_literal(1)).run().unwrap(),
+            Type::number(),
         );
     }
 
     #[test]
     fn test_addition() {
         assert_eq!(
-            TypeChecker::new(Term::addition(Term::number(1), Term::number(2)))
-                .run()
-                .unwrap(),
-            Type::Number,
+            TypeChecker::new(Term::addition(
+                Term::number_literal(1),
+                Term::number_literal(2),
+            ))
+            .run()
+            .unwrap(),
+            Type::number(),
         );
 
         assert_eq!(
-            TypeChecker::new(Term::addition(Term::True, Term::number(1)))
-                .run()
-                .unwrap_err()
-                .downcast::<TypeCheckError>()
-                .unwrap(),
+            TypeChecker::new(Term::addition(
+                Term::true_literal(),
+                Term::number_literal(1),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
             TypeCheckError::UnexpectedType,
         );
 
         assert_eq!(
-            TypeChecker::new(Term::addition(Term::number(1), Term::True))
-                .run()
-                .unwrap_err()
-                .downcast::<TypeCheckError>()
-                .unwrap(),
+            TypeChecker::new(Term::addition(
+                Term::number_literal(1),
+                Term::true_literal(),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
             TypeCheckError::UnexpectedType,
         );
     }
@@ -439,13 +482,13 @@ mod tests {
     #[test]
     fn test_variable() {
         let mut environment = TypeEnvironment::new();
-        environment.insert("a".into(), Type::Boolean);
+        environment.insert("a".into(), Type::boolean());
         assert_eq!(
             TypeChecker::new(Term::variable("a"))
                 .with_environment(environment)
                 .run()
                 .unwrap(),
-            Type::Boolean,
+            Type::boolean(),
         );
 
         assert_eq!(
@@ -463,19 +506,19 @@ mod tests {
         assert_eq!(
             TypeChecker::new(Term::function(
                 vec![
-                    Parameter::new("a", Type::Boolean),
-                    Parameter::new("b", Type::Boolean),
+                    Parameter::new("a", Type::boolean()),
+                    Parameter::new("b", Type::boolean()),
                 ],
-                Term::True,
+                Term::true_literal(),
             ))
             .run()
             .unwrap(),
             Type::function(
                 vec![
-                    Parameter::new("a", Type::Boolean),
-                    Parameter::new("b", Type::Boolean),
+                    Parameter::new("a", Type::boolean()),
+                    Parameter::new("b", Type::boolean()),
                 ],
-                Type::Boolean,
+                Type::boolean(),
             ),
         );
     }
@@ -486,20 +529,20 @@ mod tests {
             TypeChecker::new(Term::call(
                 Term::function(
                     vec![
-                        Parameter::new("a", Type::Boolean),
-                        Parameter::new("b", Type::Boolean),
+                        Parameter::new("a", Type::boolean()),
+                        Parameter::new("b", Type::boolean()),
                     ],
-                    Term::True,
+                    Term::true_literal(),
                 ),
-                vec![Term::True, Term::False],
+                vec![Term::true_literal(), Term::false_literal()],
             ))
             .run()
             .unwrap(),
-            Type::Boolean,
+            Type::boolean(),
         );
 
         assert_eq!(
-            TypeChecker::new(Term::call(Term::True, vec![]))
+            TypeChecker::new(Term::call(Term::true_literal(), vec![]))
                 .run()
                 .unwrap_err()
                 .downcast::<TypeCheckError>()
@@ -511,12 +554,12 @@ mod tests {
             TypeChecker::new(Term::call(
                 Term::function(
                     vec![
-                        Parameter::new("a", Type::Boolean),
-                        Parameter::new("b", Type::Boolean),
+                        Parameter::new("a", Type::boolean()),
+                        Parameter::new("b", Type::boolean()),
                     ],
-                    Term::True,
+                    Term::true_literal(),
                 ),
-                vec![Term::True],
+                vec![Term::true_literal()],
             ))
             .run()
             .unwrap_err()
@@ -529,12 +572,12 @@ mod tests {
             TypeChecker::new(Term::call(
                 Term::function(
                     vec![
-                        Parameter::new("a", Type::Boolean),
-                        Parameter::new("b", Type::Boolean),
+                        Parameter::new("a", Type::boolean()),
+                        Parameter::new("b", Type::boolean()),
                     ],
-                    Term::True,
+                    Term::true_literal(),
                 ),
-                vec![Term::True, Term::number(1)],
+                vec![Term::true_literal(), Term::number_literal(1)],
             ))
             .run()
             .unwrap_err()
@@ -547,35 +590,42 @@ mod tests {
     #[test]
     fn test_sequence() {
         assert_eq!(
-            TypeChecker::new(Term::sequence(Term::True, Term::number(1)))
-                .run()
-                .unwrap(),
-            Type::Number,
+            TypeChecker::new(Term::sequence(
+                Term::true_literal(),
+                Term::number_literal(1),
+            ))
+            .run()
+            .unwrap(),
+            Type::number(),
         );
     }
 
     #[test]
     fn test_constant() {
         assert_eq!(
-            TypeChecker::new(Term::constant("a", Term::True, Term::variable("a")))
-                .run()
-                .unwrap(),
-            Type::Boolean,
+            TypeChecker::new(Term::constant(
+                "a",
+                Term::true_literal(),
+                Term::variable("a"),
+            ))
+            .run()
+            .unwrap(),
+            Type::boolean(),
         );
     }
 
     #[test]
     fn test_object() {
         assert_eq!(
-            TypeChecker::new(Term::object(vec![
-                TermProperty::new("a", Term::True),
-                TermProperty::new("b", Term::number(1)),
+            TypeChecker::new(Term::object_literal(vec![
+                TermProperty::new("a", Term::true_literal()),
+                TermProperty::new("b", Term::number_literal(1)),
             ]))
             .run()
             .unwrap(),
             Type::object(vec![
-                TypeProperty::new("a", Type::Boolean),
-                TypeProperty::new("b", Type::Number),
+                TypeProperty::new("a", Type::boolean()),
+                TypeProperty::new("b", Type::number()),
             ]),
         );
     }
@@ -584,19 +634,19 @@ mod tests {
     fn test_property_access() {
         assert_eq!(
             TypeChecker::new(Term::property_access(
-                Term::object(vec![
-                    TermProperty::new("a", Term::True),
-                    TermProperty::new("b", Term::number(1)),
+                Term::object_literal(vec![
+                    TermProperty::new("a", Term::true_literal()),
+                    TermProperty::new("b", Term::number_literal(1)),
                 ]),
                 "a",
             ))
             .run()
             .unwrap(),
-            Type::Boolean,
+            Type::boolean(),
         );
 
         assert_eq!(
-            TypeChecker::new(Term::property_access(Term::True, "a"))
+            TypeChecker::new(Term::property_access(Term::true_literal(), "a"))
                 .run()
                 .unwrap_err()
                 .downcast::<TypeCheckError>()
@@ -606,9 +656,9 @@ mod tests {
 
         assert_eq!(
             TypeChecker::new(Term::property_access(
-                Term::object(vec![
-                    TermProperty::new("a", Term::True),
-                    TermProperty::new("b", Term::number(1)),
+                Term::object_literal(vec![
+                    TermProperty::new("a", Term::true_literal()),
+                    TermProperty::new("b", Term::number_literal(1)),
                 ]),
                 "c",
             ))
