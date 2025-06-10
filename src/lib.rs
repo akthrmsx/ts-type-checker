@@ -117,6 +117,13 @@ pub enum Term {
         object: Box<Self>,
         name: String,
     },
+    RecursiveFunction {
+        name: String,
+        parameters: Vec<Parameter>,
+        returning: Type,
+        body: Box<Self>,
+        next: Box<Self>,
+    },
 }
 
 impl Term {
@@ -190,6 +197,22 @@ impl Term {
         Self::PropertyAccess {
             object: Box::new(object),
             name: name.into(),
+        }
+    }
+
+    pub fn recursive_function(
+        name: &str,
+        parameters: Vec<Parameter>,
+        returning: Type,
+        body: Self,
+        next: Self,
+    ) -> Self {
+        Self::RecursiveFunction {
+            name: name.into(),
+            parameters,
+            returning,
+            body: Box::new(body),
+            next: Box::new(next),
         }
     }
 }
@@ -358,6 +381,33 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
                 .context(TypeCheckError::UnknownProperty),
             _ => bail!(TypeCheckError::UnexpectedType),
         },
+        Term::RecursiveFunction {
+            name,
+            parameters,
+            returning,
+            body,
+            next,
+        } => {
+            let function = Type::function(parameters.clone(), returning.clone());
+
+            let mut new_environment = environment.clone();
+
+            for parameter in parameters {
+                new_environment.insert(parameter.name, parameter.typing);
+            }
+
+            new_environment.insert(name.clone(), function.clone());
+
+            ensure!(
+                type_check(*body, &mut new_environment)? == returning,
+                TypeCheckError::UnexpectedType,
+            );
+
+            let mut new_environment = environment.clone();
+            new_environment.insert(name, function);
+
+            type_check(*next, &mut new_environment)
+        }
     }
 }
 
@@ -667,6 +717,37 @@ mod tests {
             .downcast::<TypeCheckError>()
             .unwrap(),
             TypeCheckError::UnknownProperty,
+        );
+    }
+
+    #[test]
+    fn test_recursive_function() {
+        assert_eq!(
+            TypeChecker::new(Term::recursive_function(
+                "f",
+                vec![Parameter::new("a", Type::number())],
+                Type::number(),
+                Term::call(Term::variable("f"), vec![Term::variable("a")]),
+                Term::variable("f"),
+            ))
+            .run()
+            .unwrap(),
+            Type::function(vec![Parameter::new("a", Type::number())], Type::number()),
+        );
+
+        assert_eq!(
+            TypeChecker::new(Term::recursive_function(
+                "f",
+                vec![Parameter::new("a", Type::number())],
+                Type::number(),
+                Term::true_literal(),
+                Term::variable("f"),
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
+            TypeCheckError::UnexpectedType,
         );
     }
 }
