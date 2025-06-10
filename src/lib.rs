@@ -419,12 +419,15 @@ mod tests {
     };
 
     #[test]
-    fn test_boolean() {
+    fn test_true_literal() {
         assert_eq!(
             TypeChecker::new(Term::true_literal()).run().unwrap(),
             Type::boolean(),
         );
+    }
 
+    #[test]
+    fn test_false_literal() {
         assert_eq!(
             TypeChecker::new(Term::false_literal()).run().unwrap(),
             Type::boolean(),
@@ -485,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn test_number() {
+    fn test_number_literal() {
         assert_eq!(
             TypeChecker::new(Term::number_literal(1)).run().unwrap(),
             Type::number(),
@@ -665,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn test_object() {
+    fn test_object_literal() {
         assert_eq!(
             TypeChecker::new(Term::object_literal(vec![
                 TermProperty::new("a", Term::true_literal()),
