@@ -74,12 +74,11 @@ impl Type {
                 },
             ) => {
                 for property2 in properties2 {
-                    match properties1
-                        .iter()
-                        .find(|property1| property1.name == property2.name)
-                    {
-                        Some(property1) if property1.typing.is_subtype(&property2.typing) => (),
-                        _ => return false,
+                    if !properties1.iter().any(|property1| {
+                        property1.name == property2.name
+                            && property1.typing.is_subtype(&property2.typing)
+                    }) {
+                        return false;
                     }
                 }
 
