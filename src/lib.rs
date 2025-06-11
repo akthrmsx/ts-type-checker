@@ -36,18 +36,64 @@ impl Type {
         properties.sort_by(|a, b| a.name.cmp(&b.name));
         Self::Object { properties }
     }
+
+    pub fn is_subtype(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Function {
+                    parameters: parameters1,
+                    returning: returning1,
+                },
+                Self::Function {
+                    parameters: parameters2,
+                    returning: returning2,
+                },
+            ) => {
+                if parameters1.len() != parameters2.len() {
+                    return false;
+                }
+
+                for (parameter1, parameter2) in parameters1.iter().zip(parameters2.iter()) {
+                    if !parameter2.typing.is_subtype(&parameter1.typing) {
+                        return false;
+                    }
+                }
+
+                if !returning1.is_subtype(returning2) {
+                    return false;
+                }
+
+                true
+            }
+            (
+                Self::Object {
+                    properties: properties1,
+                },
+                Self::Object {
+                    properties: properties2,
+                },
+            ) => {
+                for property2 in properties2 {
+                    match properties1
+                        .iter()
+                        .find(|property1| property1.name == property2.name)
+                    {
+                        Some(property1) if property1.typing.is_subtype(&property2.typing) => (),
+                        _ => return false,
+                    }
+                }
+
+                true
+            }
+            (type1, type2) => type1 == type2,
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     name: String,
     typing: Type,
-}
-
-impl PartialEq for Parameter {
-    fn eq(&self, other: &Self) -> bool {
-        self.typing == other.typing
-    }
 }
 
 impl Parameter {
@@ -336,7 +382,7 @@ fn type_check(term: Term, environment: &mut TypeEnvironment) -> Result<Type> {
 
                 for (argument, parameter) in arguments.iter().zip(parameters.iter()) {
                     ensure!(
-                        type_check(argument.clone(), environment)? == parameter.typing,
+                        type_check(argument.clone(), environment)?.is_subtype(&parameter.typing),
                         TypeCheckError::MismatchedTypes,
                     );
                 }
@@ -595,6 +641,25 @@ mod tests {
         );
 
         assert_eq!(
+            TypeChecker::new(Term::call(
+                Term::function(
+                    vec![Parameter::new(
+                        "a",
+                        Type::object(vec![TypeProperty::new("a", Type::boolean())]),
+                    )],
+                    Term::property_access(Term::variable("a"), "a"),
+                ),
+                vec![Term::object_literal(vec![
+                    TermProperty::new("a", Term::true_literal()),
+                    TermProperty::new("b", Term::number_literal(1)),
+                ])],
+            ))
+            .run()
+            .unwrap(),
+            Type::boolean(),
+        );
+
+        assert_eq!(
             TypeChecker::new(Term::call(Term::true_literal(), vec![]))
                 .run()
                 .unwrap_err()
@@ -631,6 +696,30 @@ mod tests {
                     Term::true_literal(),
                 ),
                 vec![Term::true_literal(), Term::number_literal(1)],
+            ))
+            .run()
+            .unwrap_err()
+            .downcast::<TypeCheckError>()
+            .unwrap(),
+            TypeCheckError::MismatchedTypes,
+        );
+
+        assert_eq!(
+            TypeChecker::new(Term::call(
+                Term::function(
+                    vec![Parameter::new(
+                        "a",
+                        Type::object(vec![
+                            TypeProperty::new("a", Type::boolean()),
+                            TypeProperty::new("b", Type::number()),
+                        ]),
+                    )],
+                    Term::property_access(Term::variable("a"), "a"),
+                ),
+                vec![Term::object_literal(vec![TermProperty::new(
+                    "a",
+                    Term::true_literal(),
+                )])],
             ))
             .run()
             .unwrap_err()
